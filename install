@@ -1,0 +1,35 @@
+#!/bin/bash
+DIR=$(cd "$(dirname "$0")"; pwd)
+
+# check if run as root
+if [ "$EUID" -ne 0 ]
+  then echo "Please run as root"
+  exit
+fi
+
+# create venv
+python3 -m venv ${DIR}/venv
+source ${DIR}/venv/bin/activate
+pip install -r ${DIR}/requirements.txt
+
+# create systemd service
+cat << EOF > /lib/systemd/system/clash-config-merger.service
+[Unit]
+Description=Clash Config Merger Service
+After=network.target
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5s
+WorkingDirectory=${DIR}
+ExecStart=${DIR}/venv/bin/python ${DIR}/clash-config-merger
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable clash-config-merger.service
+systemctl restart clash-config-merger.service

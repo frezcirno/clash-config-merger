@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+import os
+import re
+import time
+import json
+import copy
+import string
+from enum import Enum
+from random import choices
+from typing import Dict, List
+from dataclasses import dataclass, field
+
+import yaml
+import requests
+
+DEFAULT_HTTP_PORT = 7890
+DEFAULT_SOCKS_PORT = 7891
+DEFAULT_REDIR_PORT = 7892
+DEFAULT_TPROXY_PORT = 7893
+DEFAULT_MIXED_PORT = 7890
+DEFAULT_CONTROLLER_PORT = 9090
+
+PRESET_CHAINS = ["PROXY", "OPENAI"]
+
+with open("./template.yaml") as f:
+    TEMPLATE = yaml.safe_load(f)
+
+USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
+
+
+class Mode(Enum):
+    PROXY = "proxy"
+    TUN = "tun"
+    REDIR = "redir"
+
+
+@dataclass
+class Config:
+    mode: Mode = Mode.PROXY
+    trusted: bool = True
+
+    port: int = None  # alias to http_port
+    http_port: int = None
+    socks_port: int = None
+    redir_port: int = None
+    tproxy_port: int = None
+    mixed_port: int = None
+
+    controller_port: int = None
+    secret: str = None
+
+    redir_host: bool = None
+
+    dns: bool = None
+    eth: str = None
+
+    upstreams: Dict[str, str] = field(default_factory=dict)
+    custom_chains: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        self.mode = Mode(self.mode)
+        self.trusted = bool(self.trusted)
+
+        self.port = int(self.port) if self.port else None
+        self.http_port = int(self.http_port) if self.http_port else None
+        self.socks_port = int(self.socks_port) if self.socks_port else None
+        self.redir_port = int(self.redir_port) if self.redir_port else None
+        self.tproxy_port = int(self.tproxy_port) if self.tproxy_port else None
+        self.mixed_port = int(self.mixed_port) if self.mixed_port else None
+
+        self.controller_port = int(self.controller_port) if self.controller_port else None
+
+        self.redir_host = bool(self.redir_host)
+
+        self.dns = bool(self.dns)
+
+        self.upstreams = {k: v for k, v in self.upstreams.items() if v}
+        self.custom_chains = [c for c in self.custom_chains if c]
+
+
+def retrieve(upstream: str, ttl=3600) -> Dict:
+    print(f"Retrieving {upstream}", flush=True)
+
+    save_path = "./cache/" + str(hash(upstream)) + ".yaml"
+
+    if os.path.exists(save_path):
+        now = time.time()
+        ctime = os.path.getmtime(save_path)
+        if ctime > now:
+            # clock changed
+            print("Clock changed, ignoring cache", flush=True)
+        elif now - ctime < ttl:
+            print("Using cache", flush=True)
+            with open(save_path) as f:
+                obj = yaml.safe_load(f)
+                return obj["proxies"], obj["proxy-groups"]
+
+    resp = requests.get(upstream, headers={"User-Agent": USER_AGENT})
+    if not resp.ok:
+        raise Exception("Failed to retrieve upstream")
+
+    os.makedirs("./cache", exist_ok=True)
+    with open(save_path, "w") as f:
+        f.write(resp.text)
+
+    obj = yaml.safe_load(resp.text)
+    return obj["proxies"], obj["proxy-groups"]
+
+
+def generate(config: Config) -> Dict:
+    instance = copy.deepcopy(TEMPLATE)
+
+    if config.mode != Mode.PROXY and not config.eth:
+        raise Exception("Need eth")
+
+    if not config.upstreams:
+        raise Exception("Need upstreams")
+
+    if config.mode != Mode.PROXY:
+        config.dns = True
+        config.trusted = True
+
+    if config.mode == Mode.PROXY:
+        if config.mixed_port:
+            instance["mixed-port"] = config.mixed_port or DEFAULT_MIXED_PORT
+        else:
+            instance["port"] = config.port or config.http_port or DEFAULT_HTTP_PORT
+            instance["socks-port"] = config.socks_port or DEFAULT_SOCKS_PORT
+    elif config.mode == Mode.REDIR:
+        instance["redir-port"] = config.redir_port or DEFAULT_REDIR_PORT
+        instance["tproxy-port"] = config.tproxy_port or DEFAULT_TPROXY_PORT
+
+    if config.trusted:
+        instance["allow-lan"] = True
+        instance["bind-address"] = "*"
+        instance["external-controller"] = f"127.0.0.1:{config.controller_port or DEFAULT_CONTROLLER_PORT}"
+        instance["secret"] = ""
+    else:
+        instance["allow-lan"] = False
+        instance["bind-address"] = "127.0.0.1"
+        instance["external-controller"] = f"127.0.0.1:{config.controller_port or DEFAULT_CONTROLLER_PORT}"
+        instance["secret"] = config.secret or ''.join(choices(string.ascii_letters + string.digits, k=32))
+
+    if config.dns:
+        instance["dns"]["enable"] = True
+        instance["dns"]["listen"] = "0.0.0.0:53" if config.mode == Mode.REDIR else "127.0.0.53:53"
+        instance["dns"]["enhanced-mode"] = "fake-ip" if config.redir_host is None else "redir-host"
+        if config.mode != Mode.PROXY:
+            instance["dns"]["nameserver"].append(f"dhcp://{config.eth}")
+    else:
+        del instance["dns"]
+
+    if config.mode == Mode.TUN:
+        instance["tun"]["enable"] = True
+    else:
+        del instance["tun"]
+
+    upstream_proxies_chains = {}
+
+    for key, upstream in config.upstreams.items():
+        try:
+            upstream_proxies_chains[key] = retrieve(upstream)
+        except Exception as e:
+            print(f"Failed to retrieve {upstream}: {e}", flush=True)
+
+    instance["proxies"] = [proxy for proxies, chains in upstream_proxies_chains.values() for proxy in proxies]
+
+    proxy_groups = []
+
+    for key, (proxies, chains) in upstream_proxies_chains.items():
+        key_all = {
+            "name": key,
+            "type": "url-test",
+            "proxies": [proxy["name"] for proxy in proxies],
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 100,
+        }
+        proxy_groups.append(key_all)
+
+        oversea_key_all = {
+            "name": key + "-oversea",
+            "type": "url-test",
+            "proxies": [proxy["name"] for proxy in proxies
+                        if re.match(r"(\b(HK|hongkong|TW|taiwan)\b|🇨🇳|🇭🇰|香港|台湾)", proxy["name"], re.I) is None],
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 100,
+        }
+        proxy_groups.append(oversea_key_all)
+
+        for chain in chains:
+            if chain["type"] != "url-test":
+                continue
+
+            chain = chain.copy()
+
+            chain["name"] = key + "-" + chain["name"]
+            proxy_groups.append(chain)
+
+    chain_groups = []
+
+    for custom_chain in PRESET_CHAINS + config.custom_chains:
+        chain = {
+            "name": custom_chain,
+            "type": "select",
+            "proxies": [pg["name"] for pg in proxy_groups]
+        }
+        chain_groups.append(chain)
+
+    instance["proxy-groups"] = chain_groups + proxy_groups
+
+    return instance
+
+
+if __name__ == "__main__":
+    import sys
+    print("Python version:", sys.version)
+    bind = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else 5000
+
+    from flask import Flask, Response, request
+    app = Flask(__name__)
+
+    @app.get("/")
+    def generate_yaml():
+        args = request.values.to_dict()
+        if "upstreams" not in args:
+            with open("upstreams.json") as f:
+                args["upstreams"] = json.load(f)
+        print(args, flush=True)
+        try:
+            config = Config(**args)
+            stream = yaml.safe_dump(generate(config), allow_unicode=True, sort_keys=False)
+        except Exception as e:
+            return str(e), 500
+        return Response(stream, mimetype="text/yaml")
+
+    from gevent.pywsgi import WSGIServer
+    http_server = WSGIServer((bind, port), app)
+    http_server.serve_forever()

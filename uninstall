@@ -1,0 +1,12 @@
+#!/bin/bash
+DIR=$(cd "$(dirname "$0")"; pwd)
+
+# check if run as root
+if [ "$EUID" -ne 0 ]
+  then echo "Please run as root"
+  exit
+fi
+
+systemctl stop clash-config-merger.service
+systemctl disable clash-config-merger.service
+rm /lib/systemd/system/clash-config-merger.service
