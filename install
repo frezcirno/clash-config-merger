@@ -7,10 +7,13 @@ if [ "$EUID" -ne 0 ]
   exit
 fi
 
+# install python3-venv
+apt-get install -y python3-venv
+
 # create venv
 python3 -m venv ${DIR}/venv
 source ${DIR}/venv/bin/activate
-pip install -r ${DIR}/requirements.txt
+pip install -r ${DIR}/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # create systemd service
 cat << EOF > /lib/systemd/system/clash-config-merger.service
