@@ -292,7 +292,9 @@ rule-providers:
     interval: 86400
 
 rules:
+  # custom
   - DOMAIN-SUFFIX,openai.com,OPENAI
+  - DOMAIN-SUFFIX,github.com,GITHUB
   # allowed safe trackers
   - DOMAIN,hd.mmstat.com,DIRECT
   - DOMAIN,h-adashx.ut.taobao.com,DIRECT

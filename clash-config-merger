@@ -20,7 +20,7 @@ DEFAULT_TPROXY_PORT = 7893
 DEFAULT_MIXED_PORT = 7890
 DEFAULT_CONTROLLER_PORT = 9090
 
-PRESET_CHAINS = ["PROXY", "OPENAI"]
+PRESET_CHAINS = ["PROXY", "OPENAI", "GITHUB"]
 
 with open("./template.yaml") as f:
     TEMPLATE = yaml.safe_load(f)
@@ -107,6 +107,9 @@ def retrieve(upstream: str, ttl=3600) -> Dict:
     return obj["proxies"], obj["proxy-groups"]
 
 
+regexp = re.compile(r"(\b(HK|hongkong|TW|taiwan)\b|🇨🇳|🇭🇰|香港|台湾)", re.I)
+
+
 def generate(config: Config) -> Dict:
     instance = copy.deepcopy(TEMPLATE)
 
@@ -167,8 +170,42 @@ def generate(config: Config) -> Dict:
 
     proxy_groups = []
 
+    # all proxies
+    all_proxies = {
+        "name": "all",
+        "type": "url-test",
+        "proxies": [proxy["name"] for proxy in instance["proxies"]],
+        "url": "http://www.gstatic.com/generate_204",
+        "interval": 300,
+        "tolerance": 100,
+    }
+    proxy_groups.append(all_proxies)
+
+    all_proxies_cn = {
+        "name": "all-cn",
+        "type": "url-test",
+        "proxies": [proxy["name"] for proxy in instance["proxies"] if regexp.search(proxy["name"])],
+        "url": "http://www.gstatic.com/generate_204",
+        "interval": 300,
+        "tolerance": 100,
+    }
+    if all_proxies_cn["proxies"]:
+        proxy_groups.append(all_proxies_cn)
+
+    all_proxies_oversea = {
+        "name": "all-oversea",
+        "type": "url-test",
+        "proxies": [proxy["name"] for proxy in instance["proxies"] if regexp.search(proxy["name"]) is None],
+        "url": "http://www.gstatic.com/generate_204",
+        "interval": 300,
+        "tolerance": 100,
+    }
+    if all_proxies_oversea["proxies"]:
+        proxy_groups.append(all_proxies_oversea)
+
+    # upstream proxies invidually
     for key, (proxies, chains) in upstream_proxies_chains.items():
-        key_all = {
+        upstream_all_proxies = {
             "name": key,
             "type": "url-test",
             "proxies": [proxy["name"] for proxy in proxies],
@@ -176,21 +213,35 @@ def generate(config: Config) -> Dict:
             "interval": 300,
             "tolerance": 100,
         }
-        proxy_groups.append(key_all)
+        proxy_groups.append(upstream_all_proxies)
 
-        oversea_key_all = {
-            "name": key + "-oversea",
+        upstream_all_proxies_cn = {
+            "name": key + "-cn",
             "type": "url-test",
-            "proxies": [proxy["name"] for proxy in proxies
-                        if re.match(r"(\b(HK|hongkong|TW|taiwan)\b|🇨🇳|🇭🇰|香港|台湾)", proxy["name"], re.I) is None],
+            "proxies": [proxy["name"] for proxy in proxies if regexp.search(proxy["name"])],
             "url": "http://www.gstatic.com/generate_204",
             "interval": 300,
             "tolerance": 100,
         }
-        proxy_groups.append(oversea_key_all)
+        if upstream_all_proxies_cn["proxies"]:
+            proxy_groups.append(upstream_all_proxies_cn)
+
+        upstream_all_proxies_oversea = {
+            "name": key + "-oversea",
+            "type": "url-test",
+            "proxies": [proxy["name"] for proxy in proxies if regexp.search(proxy["name"]) is None],
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 100,
+        }
+        if upstream_all_proxies_oversea["proxies"]:
+            proxy_groups.append(upstream_all_proxies_oversea)
 
         for chain in chains:
             if chain["type"] != "url-test":
+                continue
+
+            if set(chain["proxies"]) == set(upstream_all_proxies["proxies"]):
                 continue
 
             chain = chain.copy()
