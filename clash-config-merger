@@ -2,10 +2,11 @@
 import os
 import re
 import time
-import json
 import copy
 import string
+import traceback
 from enum import Enum
+from hashlib import sha1
 from random import choices
 from typing import Dict, List
 from dataclasses import dataclass, field
@@ -20,7 +21,7 @@ DEFAULT_TPROXY_PORT = 7893
 DEFAULT_MIXED_PORT = 7890
 DEFAULT_CONTROLLER_PORT = 9090
 
-PRESET_CHAINS = ["PROXY", "OPENAI", "GITHUB"]
+PRESET_CHAINS = ["PROXY", "OPENAI", "GITHUB", "IPFS"]
 
 with open("./template.yaml") as f:
     TEMPLATE = yaml.safe_load(f)
@@ -81,7 +82,7 @@ class Config:
 def retrieve(upstream: str, ttl=3600) -> Dict:
     print(f"Retrieving {upstream}", flush=True)
 
-    save_path = "./cache/" + str(hash(upstream)) + ".yaml"
+    save_path = "./cache/" + sha1(upstream.encode()).hexdigest() + ".yaml"
 
     if os.path.exists(save_path):
         now = time.time()
@@ -160,11 +161,33 @@ def generate(config: Config) -> Dict:
 
     upstream_proxies_chains = {}
 
+    proxy_names = set()
     for key, upstream in config.upstreams.items():
         try:
-            upstream_proxies_chains[key] = retrieve(upstream)
+            proxies, chains = retrieve(upstream)
+
+            # Remove indicator proxies
+            proxies = [proxy for proxy in proxies if "有效期" not in proxy["name"]]
+            for chain in chains:
+                chain["proxies"] = [proxy for proxy in chain["proxies"] if "有效期" not in proxy]
+
+            # check name collision
+            for proxy in proxies:
+                if (proxy_name := proxy['name']) in proxy_names:
+                    # find a new name for it
+                    cnt = 1
+                    while (new_name := proxy['name'] + '#' + str(cnt)) in proxy_names:
+                        cnt += 1
+                    # update name
+                    proxy['name'] = new_name
+                    for chain in chains:
+                        chain["proxies"] = [new_name if cp == proxy_name else cp for cp in chain["proxies"]]
+
+                proxy_names.add(proxy['name'])
+
+            upstream_proxies_chains[key] = proxies, chains
         except Exception as e:
-            print(f"Failed to retrieve {upstream}: {e}", flush=True)
+            print(f"Failed to retrieve {upstream}: {e}\n{traceback.format_exc()}", flush=True)
 
     instance["proxies"] = [proxy for proxies, chains in upstream_proxies_chains.values() for proxy in proxies]
 
@@ -277,8 +300,8 @@ if __name__ == "__main__":
     def generate_yaml():
         args = request.values.to_dict()
         if "upstreams" not in args:
-            with open("upstreams.json") as f:
-                args["upstreams"] = json.load(f)
+            with open("upstreams.yaml") as f:
+                args["upstreams"] = yaml.safe_load(f)
         print(args, flush=True)
         try:
             config = Config(**args)
