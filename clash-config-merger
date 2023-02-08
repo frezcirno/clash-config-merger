@@ -55,6 +55,8 @@ class Config:
     dns: bool = None
     eth: str = None
 
+    custom_groups: List[str] = field(default_factory=list)
+
     upstreams: Dict[str, str] = field(default_factory=dict)
     custom_chains: List[str] = field(default_factory=list)
 
@@ -74,6 +76,8 @@ class Config:
         self.redir_host = bool(self.redir_host)
 
         self.dns = bool(self.dns)
+
+        self.custom_groups = self.custom_groups.split(",") if self.custom_groups else []
 
         self.upstreams = {k: v for k, v in self.upstreams.items() if v}
         self.custom_chains = [c for c in self.custom_chains if c]
@@ -129,6 +133,7 @@ def generate(config: Config) -> Dict:
             instance["mixed-port"] = config.mixed_port or DEFAULT_MIXED_PORT
         else:
             instance["port"] = config.port or config.http_port or DEFAULT_HTTP_PORT
+        if config.socks_port:
             instance["socks-port"] = config.socks_port or DEFAULT_SOCKS_PORT
     elif config.mode == Mode.REDIR:
         instance["redir-port"] = config.redir_port or DEFAULT_REDIR_PORT
@@ -169,7 +174,9 @@ def generate(config: Config) -> Dict:
             # Remove indicator proxies
             proxies = [proxy for proxy in proxies if "有效期" not in proxy["name"]]
             for chain in chains:
-                chain["proxies"] = [proxy for proxy in chain["proxies"] if "有效期" not in proxy]
+                chain["proxies"] = [proxy for proxy in chain["proxies"]
+                                    if "有效期" not in proxy and proxy not in ["DIRECT", "REJECT", "GLOBAL"]]
+            chains = [chain for chain in chains if chain["proxies"]]
 
             # check name collision
             for proxy in proxies:
@@ -204,27 +211,53 @@ def generate(config: Config) -> Dict:
     }
     proxy_groups.append(all_proxies)
 
-    all_proxies_cn = {
-        "name": "all-cn",
-        "type": "url-test",
-        "proxies": [proxy["name"] for proxy in instance["proxies"] if regexp.search(proxy["name"])],
-        "url": "http://www.gstatic.com/generate_204",
-        "interval": 300,
-        "tolerance": 100,
-    }
-    if all_proxies_cn["proxies"]:
-        proxy_groups.append(all_proxies_cn)
+    if 'cn' in config.custom_groups:
+        all_proxies_cn = {
+            "name": "all-cn",
+            "type": "url-test",
+            "proxies": [proxy["name"] for proxy in instance["proxies"] if regexp.search(proxy["name"])],
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 100,
+        }
+        if all_proxies_cn["proxies"]:
+            proxy_groups.append(all_proxies_cn)
 
-    all_proxies_oversea = {
-        "name": "all-oversea",
-        "type": "url-test",
-        "proxies": [proxy["name"] for proxy in instance["proxies"] if regexp.search(proxy["name"]) is None],
-        "url": "http://www.gstatic.com/generate_204",
-        "interval": 300,
-        "tolerance": 100,
-    }
-    if all_proxies_oversea["proxies"]:
-        proxy_groups.append(all_proxies_oversea)
+    if 'oversea' in config.custom_groups:
+        all_proxies_oversea = {
+            "name": "all-oversea",
+            "type": "url-test",
+            "proxies": [proxy["name"] for proxy in instance["proxies"] if regexp.search(proxy["name"]) is None],
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 100,
+        }
+        if all_proxies_oversea["proxies"]:
+            proxy_groups.append(all_proxies_oversea)
+
+    if 'udp' in config.custom_groups:
+        all_proxies_udp = {
+            "name": "all-udp",
+            "type": "url-test",
+            "proxies": [proxy["name"] for proxy in instance["proxies"] if proxy.get("udp", False)],
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 100,
+        }
+        if all_proxies_udp["proxies"]:
+            proxy_groups.append(all_proxies_udp)
+
+    if 'udp-oversea' in config.custom_groups:
+        all_proxies_udp_oversea = {
+            "name": "all-udp-oversea",
+            "type": "url-test",
+            "proxies": [proxy["name"] for proxy in instance["proxies"] if proxy.get("udp", False) and regexp.search(proxy["name"]) is None],
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 100,
+        }
+        if all_proxies_udp_oversea["proxies"]:
+            proxy_groups.append(all_proxies_udp_oversea)
 
     # upstream proxies invidually
     for key, (proxies, chains) in upstream_proxies_chains.items():
@@ -238,27 +271,53 @@ def generate(config: Config) -> Dict:
         }
         proxy_groups.append(upstream_all_proxies)
 
-        upstream_all_proxies_cn = {
-            "name": key + "-cn",
-            "type": "url-test",
-            "proxies": [proxy["name"] for proxy in proxies if regexp.search(proxy["name"])],
-            "url": "http://www.gstatic.com/generate_204",
-            "interval": 300,
-            "tolerance": 100,
-        }
-        if upstream_all_proxies_cn["proxies"]:
-            proxy_groups.append(upstream_all_proxies_cn)
+        if 'cn' in config.custom_groups:
+            upstream_all_proxies_cn = {
+                "name": key + "-cn",
+                "type": "url-test",
+                "proxies": [proxy["name"] for proxy in proxies if regexp.search(proxy["name"])],
+                "url": "http://www.gstatic.com/generate_204",
+                "interval": 300,
+                "tolerance": 100,
+            }
+            if upstream_all_proxies_cn["proxies"]:
+                proxy_groups.append(upstream_all_proxies_cn)
 
-        upstream_all_proxies_oversea = {
-            "name": key + "-oversea",
-            "type": "url-test",
-            "proxies": [proxy["name"] for proxy in proxies if regexp.search(proxy["name"]) is None],
-            "url": "http://www.gstatic.com/generate_204",
-            "interval": 300,
-            "tolerance": 100,
-        }
-        if upstream_all_proxies_oversea["proxies"]:
-            proxy_groups.append(upstream_all_proxies_oversea)
+        if 'oversea' in config.custom_groups:
+            upstream_all_proxies_oversea = {
+                "name": key + "-oversea",
+                "type": "url-test",
+                "proxies": [proxy["name"] for proxy in proxies if regexp.search(proxy["name"]) is None],
+                "url": "http://www.gstatic.com/generate_204",
+                "interval": 300,
+                "tolerance": 100,
+            }
+            if upstream_all_proxies_oversea["proxies"]:
+                proxy_groups.append(upstream_all_proxies_oversea)
+
+        if 'udp' in config.custom_groups:
+            upstream_all_proxies_udp = {
+                "name": key + "-udp",
+                "type": "url-test",
+                "proxies": [proxy["name"] for proxy in proxies if proxy.get("udp", False)],
+                "url": "http://www.gstatic.com/generate_204",
+                "interval": 300,
+                "tolerance": 100,
+            }
+            if upstream_all_proxies_udp["proxies"]:
+                proxy_groups.append(upstream_all_proxies_udp)
+
+        if 'udp-oversea' in config.custom_groups:
+            upstream_all_proxies_udp_oversea = {
+                "name": key + "-udp-oversea",
+                "type": "url-test",
+                "proxies": [proxy["name"] for proxy in proxies if proxy.get("udp", False) and regexp.search(proxy["name"]) is None],
+                "url": "http://www.gstatic.com/generate_204",
+                "interval": 300,
+                "tolerance": 100,
+            }
+            if upstream_all_proxies_udp_oversea["proxies"]:
+                proxy_groups.append(upstream_all_proxies_udp_oversea)
 
         for chain in chains:
             if chain["type"] != "url-test":
@@ -280,6 +339,8 @@ def generate(config: Config) -> Dict:
             "type": "select",
             "proxies": [pg["name"] for pg in proxy_groups]
         }
+        if "direct" in config.custom_groups:
+            chain["proxies"].append("DIRECT")
         chain_groups.append(chain)
 
     instance["proxy-groups"] = chain_groups + proxy_groups
