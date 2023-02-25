@@ -83,10 +83,10 @@ class Config:
         self.custom_chains = [c for c in self.custom_chains if c]
 
 
-def retrieve(upstream: str, ttl=3600) -> Dict:
-    print(f"Retrieving {upstream}", flush=True)
+def retrieve(url: str, ttl=3600) -> Dict:
+    print(f"Retrieving {url}", flush=True)
 
-    save_path = "./cache/" + sha1(upstream.encode()).hexdigest() + ".yaml"
+    save_path = "./cache/" + sha1(url.encode()).hexdigest() + ".yaml"
 
     if os.path.exists(save_path):
         now = time.time()
@@ -96,19 +96,23 @@ def retrieve(upstream: str, ttl=3600) -> Dict:
             print("Clock changed, ignoring cache", flush=True)
         elif now - ctime < ttl:
             print("Using cache", flush=True)
-            with open(save_path) as f:
-                obj = yaml.safe_load(f)
-                return obj["proxies"], obj["proxy-groups"]
+            with open(save_path, "rb") as f:
+                return f.read()
 
-    resp = requests.get(upstream, headers={"User-Agent": USER_AGENT})
+    resp = requests.get(url, headers={"User-Agent": USER_AGENT})
     if not resp.ok:
         raise Exception("Failed to retrieve upstream")
 
     os.makedirs("./cache", exist_ok=True)
-    with open(save_path, "w") as f:
-        f.write(resp.text)
+    with open(save_path, "wb") as f:
+        f.write(resp.content)
 
-    obj = yaml.safe_load(resp.text)
+    return resp.content
+
+
+def retrieve_upstream(upstream: str, ttl=3600) -> Dict:
+    content = retrieve(upstream, ttl)
+    obj = yaml.safe_load(content)
     return obj["proxies"], obj["proxy-groups"]
 
 
@@ -169,7 +173,7 @@ def generate(config: Config) -> Dict:
     proxy_names = set()
     for key, upstream in config.upstreams.items():
         try:
-            proxies, chains = retrieve(upstream)
+            proxies, chains = retrieve_upstream(upstream)
 
             # Remove indicator proxies
             proxies = [proxy for proxy in proxies if "有效期" not in proxy["name"]]
@@ -354,10 +358,10 @@ if __name__ == "__main__":
     bind = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 5000
 
-    from flask import Flask, Response, request
+    from flask import Flask, Response, request, url_for
     app = Flask(__name__)
 
-    @app.get("/")
+    @app.get("/clash/config.yaml")
     def generate_yaml():
         args = request.values.to_dict()
         if "upstreams" not in args:
@@ -366,10 +370,21 @@ if __name__ == "__main__":
         print(args, flush=True)
         try:
             config = Config(**args)
-            stream = yaml.safe_dump(generate(config), allow_unicode=True, sort_keys=False)
+            clash_config = generate(config)
+            for rp, value in clash_config["rule-providers"].items():
+                value["url"] = url_for("forward", key=rp, _external=True, _scheme="http")
+            stream = yaml.safe_dump(clash_config, allow_unicode=True, sort_keys=False)
         except Exception as e:
             return str(e), 500
         return Response(stream, mimetype="text/yaml")
+
+    @app.get("/clash/forward")
+    def forward():
+        key = request.values.get("key")
+        if key not in TEMPLATE["rule-providers"]:
+            return "Not found", 404
+        url = TEMPLATE["rule-providers"][key]["url"]
+        return retrieve(url, 86400)
 
     from gevent.pywsgi import WSGIServer
     http_server = WSGIServer((bind, port), app)
