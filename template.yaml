@@ -293,6 +293,7 @@ rule-providers:
 
 rules:
   # custom
+  - DOMAIN-SUFFIX,bing.com,BING
   - DOMAIN-SUFFIX,openai.com,OPENAI
   - DOMAIN-SUFFIX,github.com,GITHUB
   - DOMAIN-KEYWORD,ipfs,IPFS
