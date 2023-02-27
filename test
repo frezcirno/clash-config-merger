@@ -1,14 +1,8 @@
 #!/bin/bash
 DIR=$(cd "$(dirname "$0")"; pwd)
 
-# check if run as root
-if [ "$EUID" -ne 0 ]
-  then echo "Please run as root"
-  exit
-fi
-
 # install python3-venv
-apt-get install -y python3-venv
+sudo apt-get install -y python3-venv
 
 # create venv
 python3 -m venv ${DIR}/venv
