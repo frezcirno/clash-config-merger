@@ -5,14 +5,15 @@ import re
 import string
 import time
 import traceback
-from dataclasses import dataclass, field
 from enum import Enum
 from hashlib import sha1
 from random import choices
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import requests
 import yaml
+from pydantic import Field
+from pydantic.dataclasses import dataclass
 
 DEFAULT_HTTP_PORT = 7890
 DEFAULT_SOCKS_PORT = 7891
@@ -29,7 +30,7 @@ PRESET_CHAINS = ["PROXY"] + list({rule.split(",")[2] for rule in TEMPLATE["rules
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
 
 
-class Mode(Enum):
+class Mode(str, Enum):
     PROXY = "proxy"
     TUN = "tun"
     REDIR = "redir"
@@ -40,47 +41,36 @@ class Config:
     mode: Mode = Mode.PROXY
     trusted: bool = True
 
-    port: int = None  # alias to http_port
-    http_port: int = None
-    socks_port: int = None
-    redir_port: int = None
-    tproxy_port: int = None
-    mixed_port: int = None
+    port: int = DEFAULT_HTTP_PORT
+    http_port: Optional[int] = None  # alias for port
+    socks_port: Optional[int] = None
+    redir_port: int = DEFAULT_REDIR_PORT
+    tproxy_port: int = DEFAULT_TPROXY_PORT
+    mixed_port: Optional[int] = None
 
-    controller_port: int = None
-    secret: str = None
+    controller_port: int = DEFAULT_CONTROLLER_PORT
+    secret: Optional[str] = None
 
-    redir_host: bool = None
+    fake_ip: bool = False
 
-    dns: bool = None
-    eth: str = None
+    dns: bool = False
+    eth: Optional[str] = None
 
-    custom_groups: List[str] = field(default_factory=list)
+    keep_upstream_chains: bool = False
+    custom_groups: List[str] = Field(default_factory=list)
 
-    upstreams: Dict[str, str] = field(default_factory=dict)
-    custom_chains: List[str] = field(default_factory=list)
+    upstreams: Dict[str, str] = Field(default_factory=dict)
+    custom_chains: List[str] = Field(default_factory=list)
 
     def __post_init__(self):
-        self.mode = Mode(self.mode)
-        self.trusted = bool(self.trusted)
+        if isinstance(self.custom_groups, str):
+            self.custom_groups = self.custom_groups.split(",") if self.custom_groups else []
 
-        self.port = int(self.port) if self.port else None
-        self.http_port = int(self.http_port) if self.http_port else None
-        self.socks_port = int(self.socks_port) if self.socks_port else None
-        self.redir_port = int(self.redir_port) if self.redir_port else None
-        self.tproxy_port = int(self.tproxy_port) if self.tproxy_port else None
-        self.mixed_port = int(self.mixed_port) if self.mixed_port else None
+    def __post_init_post_parse__(self):
+        if self.http_port is not None:
+            self.port = self.http_port
 
-        self.controller_port = int(self.controller_port) if self.controller_port else None
-
-        self.redir_host = bool(self.redir_host)
-
-        self.dns = bool(self.dns)
-
-        self.custom_groups = self.custom_groups.split(",") if self.custom_groups else []
-
-        self.upstreams = {k: v for k, v in self.upstreams.items() if v}
-        self.custom_chains = [c for c in self.custom_chains if c]
+        self.upstreams = {k.strip(): v.strip() for k, v in self.upstreams.items()}
 
 
 def retrieve(url: str, ttl=3600) -> Dict:
@@ -95,7 +85,6 @@ def retrieve(url: str, ttl=3600) -> Dict:
             # clock changed
             print("Clock changed, ignoring cache", flush=True)
         elif now - ctime < ttl:
-            print("Using cache", flush=True)
             with open(save_path, "rb") as f:
                 return f.read()
 
@@ -133,31 +122,31 @@ def generate(config: Config) -> Dict:
         config.trusted = True
 
     if config.mode == Mode.PROXY:
-        if config.mixed_port:
+        if config.mixed_port is not None:
             instance["mixed-port"] = config.mixed_port or DEFAULT_MIXED_PORT
         else:
-            instance["port"] = config.port or config.http_port or DEFAULT_HTTP_PORT
-        if config.socks_port:
+            instance["port"] = config.port
+        if config.socks_port is not None:
             instance["socks-port"] = config.socks_port or DEFAULT_SOCKS_PORT
     elif config.mode == Mode.REDIR:
-        instance["redir-port"] = config.redir_port or DEFAULT_REDIR_PORT
-        instance["tproxy-port"] = config.tproxy_port or DEFAULT_TPROXY_PORT
+        instance["redir-port"] = config.redir_port
+        instance["tproxy-port"] = config.tproxy_port
 
     if config.trusted:
         instance["allow-lan"] = True
         instance["bind-address"] = "*"
-        instance["external-controller"] = f"127.0.0.1:{config.controller_port or DEFAULT_CONTROLLER_PORT}"
+        instance["external-controller"] = f"127.0.0.1:{config.controller_port}"
         instance["secret"] = ""
     else:
         instance["allow-lan"] = False
         instance["bind-address"] = "127.0.0.1"
-        instance["external-controller"] = f"127.0.0.1:{config.controller_port or DEFAULT_CONTROLLER_PORT}"
-        instance["secret"] = config.secret or ''.join(choices(string.ascii_letters + string.digits, k=32))
+        instance["external-controller"] = f"127.0.0.1:{config.controller_port}"
+        instance["secret"] = config.secret if config.secret is not None else ''.join(choices(string.ascii_letters + string.digits, k=32))
 
     if config.dns:
         instance["dns"]["enable"] = True
         instance["dns"]["listen"] = "0.0.0.0:53" if config.mode == Mode.REDIR else "127.0.0.53:53"
-        instance["dns"]["enhanced-mode"] = "fake-ip" if config.redir_host is None else "redir-host"
+        instance["dns"]["enhanced-mode"] = "fake-ip" if config.fake_ip else "redir-host"
         if config.mode != Mode.PROXY:
             instance["dns"]["nameserver"].append(f"dhcp://{config.eth}")
     else:
@@ -323,17 +312,18 @@ def generate(config: Config) -> Dict:
             if upstream_all_proxies_udp_oversea["proxies"]:
                 proxy_groups.append(upstream_all_proxies_udp_oversea)
 
-        for chain in chains:
-            if chain["type"] != "url-test":
-                continue
+        if config.keep_upstream_chains:
+            for chain in chains:
+                if chain["type"] != "url-test":
+                    continue
 
-            if set(chain["proxies"]) == set(upstream_all_proxies["proxies"]):
-                continue
+                if set(chain["proxies"]) == set(upstream_all_proxies["proxies"]):
+                    continue
 
-            chain = chain.copy()
+                chain = chain.copy()
 
-            chain["name"] = key + "-" + chain["name"]
-            proxy_groups.append(chain)
+                chain["name"] = key + "-" + chain["name"]
+                proxy_groups.append(chain)
 
     chain_groups = []
 
@@ -375,6 +365,7 @@ if __name__ == "__main__":
                 value["url"] = url_for("forward", key=rp, _external=True, _scheme="http")
             stream = yaml.safe_dump(clash_config, allow_unicode=True, sort_keys=False)
         except Exception as e:
+            print(f"Generate config failed: {e}\n{traceback.format_exc()}", flush=True)
             return str(e), 500
         return Response(stream, mimetype="text/yaml")
 

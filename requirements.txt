@@ -2,3 +2,4 @@ pyyaml
 requests
 flask
 gevent
+pydantic
