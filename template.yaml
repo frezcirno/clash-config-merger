@@ -1,3 +1,6 @@
+# Clash configuration file template
+# https://lancellc.gitbook.io/clash/clash-config-file/general
+
 # Port of HTTP(S) proxy server on the local end
 # port: 7890
 
@@ -32,6 +35,7 @@ bind-address: "127.0.0.1"
 # rule: rule-based packet routing
 # global: all packets will be forwarded to a single endpoint
 # direct: directly forward the packets to the Internet
+# script: use external script to control the routing
 mode: rule
 
 # Clash by default prints logs to STDOUT
@@ -100,7 +104,7 @@ dns:
     - 101.101.101.101 # https://dns.twnic.tw/dns-query
     # - 101.102.103.104
 
-  enhanced-mode: redir-host
+  enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16 # Fake IP addresses pool CIDR
 
   # Hostnames in this list will not be resolved with fake IPs
@@ -182,6 +186,8 @@ tun:
     - 8.8.8.8:53
     - 8.8.4.4:53
     - 1.0.0.1:53
+  # Use Linux kernel nftables feature on pure Go. It can be replaced with redir-port (TCP) without any network config.
+  auto-redir: true
   auto-route: true # auto set global route
   auto-detect-interface: true # conflict with interface-name
 
@@ -291,11 +297,17 @@ rule-providers:
     path: ./ruleset/applications.yaml
     interval: 86400
 
+script:
+  shortcuts:
+    github_ssh: host == 'github.com' and dst_port == 22
+
 rules:
   # custom
   - DOMAIN-SUFFIX,bing.com,BING
   - DOMAIN-SUFFIX,openai.com,OPENAI
-  - DOMAIN-SUFFIX,github.com,GITHUB
+  - SCRIPT,github_ssh,GITHUB
+  - PROCESS-NAME,git-remote-http,GITHUB
+  - PROCESS-NAME,git-remote-http.exe,GITHUB
   - DOMAIN-KEYWORD,ipfs,IPFS
   # allowed safe trackers
   - DOMAIN,hd.mmstat.com,DIRECT

@@ -51,7 +51,7 @@ class Config:
     controller_port: int = DEFAULT_CONTROLLER_PORT
     secret: Optional[str] = None
 
-    fake_ip: bool = False
+    fake_ip: bool = True
 
     dns: bool = False
     eth: Optional[str] = None
