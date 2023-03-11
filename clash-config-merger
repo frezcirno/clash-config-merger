@@ -228,29 +228,29 @@ def generate(config: Config) -> Dict:
         if all_proxies_oversea["proxies"]:
             proxy_groups.append(all_proxies_oversea)
 
-    if 'udp' in config.custom_groups:
-        all_proxies_udp = {
-            "name": "all-udp",
-            "type": "url-test",
-            "proxies": [proxy["name"] for proxy in instance["proxies"] if proxy.get("udp", False)],
-            "url": "http://www.gstatic.com/generate_204",
-            "interval": 300,
-            "tolerance": 100,
-        }
-        if all_proxies_udp["proxies"]:
-            proxy_groups.append(all_proxies_udp)
+    # if 'udp' in config.custom_groups:
+    #     all_proxies_udp = {
+    #         "name": "all-udp",
+    #         "type": "url-test",
+    #         "proxies": [proxy["name"] for proxy in instance["proxies"] if proxy.get("udp", False)],
+    #         "url": "http://www.gstatic.com/generate_204",
+    #         "interval": 300,
+    #         "tolerance": 100,
+    #     }
+    #     if all_proxies_udp["proxies"]:
+    #         proxy_groups.append(all_proxies_udp)
 
-    if 'udp-oversea' in config.custom_groups:
-        all_proxies_udp_oversea = {
-            "name": "all-udp-oversea",
-            "type": "url-test",
-            "proxies": [proxy["name"] for proxy in instance["proxies"] if proxy.get("udp", False) and regexp.search(proxy["name"]) is None],
-            "url": "http://www.gstatic.com/generate_204",
-            "interval": 300,
-            "tolerance": 100,
-        }
-        if all_proxies_udp_oversea["proxies"]:
-            proxy_groups.append(all_proxies_udp_oversea)
+    # if 'udp-oversea' in config.custom_groups:
+    #     all_proxies_udp_oversea = {
+    #         "name": "all-udp-oversea",
+    #         "type": "url-test",
+    #         "proxies": [proxy["name"] for proxy in instance["proxies"] if proxy.get("udp", False) and regexp.search(proxy["name"]) is None],
+    #         "url": "http://www.gstatic.com/generate_204",
+    #         "interval": 300,
+    #         "tolerance": 100,
+    #     }
+    #     if all_proxies_udp_oversea["proxies"]:
+    #         proxy_groups.append(all_proxies_udp_oversea)
 
     # upstream proxies invidually
     for key, (proxies, chains) in upstream_proxies_chains.items():
@@ -288,29 +288,29 @@ def generate(config: Config) -> Dict:
             if upstream_all_proxies_oversea["proxies"]:
                 proxy_groups.append(upstream_all_proxies_oversea)
 
-        if 'udp' in config.custom_groups:
-            upstream_all_proxies_udp = {
-                "name": key + "-udp",
-                "type": "url-test",
-                "proxies": [proxy["name"] for proxy in proxies if proxy.get("udp", False)],
-                "url": "http://www.gstatic.com/generate_204",
-                "interval": 300,
-                "tolerance": 100,
-            }
-            if upstream_all_proxies_udp["proxies"]:
-                proxy_groups.append(upstream_all_proxies_udp)
+        # if 'udp' in config.custom_groups:
+        #     upstream_all_proxies_udp = {
+        #         "name": key + "-udp",
+        #         "type": "url-test",
+        #         "proxies": [proxy["name"] for proxy in proxies if proxy.get("udp", False)],
+        #         "url": "http://www.gstatic.com/generate_204",
+        #         "interval": 300,
+        #         "tolerance": 100,
+        #     }
+        #     if upstream_all_proxies_udp["proxies"]:
+        #         proxy_groups.append(upstream_all_proxies_udp)
 
-        if 'udp-oversea' in config.custom_groups:
-            upstream_all_proxies_udp_oversea = {
-                "name": key + "-udp-oversea",
-                "type": "url-test",
-                "proxies": [proxy["name"] for proxy in proxies if proxy.get("udp", False) and regexp.search(proxy["name"]) is None],
-                "url": "http://www.gstatic.com/generate_204",
-                "interval": 300,
-                "tolerance": 100,
-            }
-            if upstream_all_proxies_udp_oversea["proxies"]:
-                proxy_groups.append(upstream_all_proxies_udp_oversea)
+        # if 'udp-oversea' in config.custom_groups:
+        #     upstream_all_proxies_udp_oversea = {
+        #         "name": key + "-udp-oversea",
+        #         "type": "url-test",
+        #         "proxies": [proxy["name"] for proxy in proxies if proxy.get("udp", False) and regexp.search(proxy["name"]) is None],
+        #         "url": "http://www.gstatic.com/generate_204",
+        #         "interval": 300,
+        #         "tolerance": 100,
+        #     }
+        #     if upstream_all_proxies_udp_oversea["proxies"]:
+        #         proxy_groups.append(upstream_all_proxies_udp_oversea)
 
         if config.keep_upstream_chains:
             for chain in chains:

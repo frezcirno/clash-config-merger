@@ -308,6 +308,8 @@ rules:
   - SCRIPT,github_ssh,GITHUB
   - PROCESS-NAME,git-remote-http,GITHUB
   - PROCESS-NAME,git-remote-http.exe,GITHUB
+  - PROCESS-NAME,git-remote-https,GITHUB
+  - PROCESS-NAME,git-remote-https.exe,GITHUB
   - DOMAIN-KEYWORD,ipfs,IPFS
   # allowed safe trackers
   - DOMAIN,hd.mmstat.com,DIRECT
